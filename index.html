@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>تشخیص رنگ با دوربین</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #f0f0f0;
+    }
+    #video {
+      display: none;
+    }
+    #canvas {
+      width: 100%;
+      max-width: 640px;
+      height: auto;
+      background: #000;
+      border: 2px solid #333;
+    }
+    #controls {
+      margin: 10px;
+    }
+    #colorInfo {
+      font-size: 18px;
+      margin: 10px;
+      padding: 10px;
+      background: #fff;
+      border-radius: 5px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.2);
+    }
+    #colorBox {
+      width: 50px;
+      height: 50px;
+      display: inline-block;
+      border: 1px solid #000;
+      vertical-align: middle;
+    }
+    button {
+      font-size: 16px;
+      padding: 8px 16px;
+      margin: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h2>تشخیص رنگ با دوربین</h2>
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="controls">
+    <button id="switchCamera">تغییر دوربین</button>
+  </div>
+  <div id="colorInfo">
+    <span>رنگ: </span><span id="colorName">در انتظار...</span><br>
+    <span>کد هگز: </span><span id="hexCode">-</span><br>
+    <span>کد RGB: </span><span id="rgbCode">-</span><br>
+    <div id="colorBox"></div>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const switchBtn = document.getElementById('switchCamera');
+    const colorNameEl = document.getElementById('colorName');
+    const hexCodeEl = document.getElementById('hexCode');
+    const rgbCodeEl = document.getElementById('rgbCode');
+    const colorBoxEl = document.getElementById('colorBox');
+
+    let currentStream;
+    let useFrontCamera = false; // Default to rear camera
+    let lastColorName = '';
+
+    // List of 60 colors with Persian names, hex, and RGB codes
+    const colors = [
+      { name: 'آبی', hex: '#0000FF', rgb: [0, 0, 255] },
+      { name: 'آبی تیره', hex: '#00008B', rgb: [0, 0, 139] },
+      { name: 'آبی روشن', hex: '#ADD8E6', rgb: [173, 216, 230] },
+      { name: 'سبز پسته‌ای', hex: '#93C572', rgb: [147, 197, 114] },
+      { name: 'آبی پارسی', hex: '#1C39BB', rgb: [28, 57, 187] }, // Persian Blue[](https://www.rgbcolorcode.com/color/persian-blue)
+      { name: 'سبز پارسی', hex: '#00A693', rgb: [0, 166, 147] }, // Persian Green[](https://www.cyruscrafts.com/blog/information/an-introduction-to-the-persian-colors)
+      { name: 'قرمز', hex: '#FF0000', rgb: [255, 0, 0] },
+      { name: 'قرمز تیره', hex: '#8B0000', rgb: [139, 0, 0] },
+      { name: 'قرمز روشن', hex: '#FF6666', rgb: [255, 102, 102] },
+      { name: 'سبز', hex: '#008000', rgb: [0, 128, 0] },
+      { name: 'سبز تیره', hex: '#006400', rgb: [0, 100, 0] },
+      { name: 'سبز روشن', hex: '#90EE90', rgb: [144, 238, 144] },
+      { name: 'زرد', hex: '#FFFF00', rgb: [255, 255, 0] },
+      { name: 'زرد تیره', hex: '#FFC107', rgb: [255, 193, 7] },
+      { name: 'زرد روشن', hex: '#FFFFE0', rgb: [255, 255, 224] },
+      { name: 'نارنجی', hex: '#FFA500', rgb: [255, 165, 0] },
+      { name: 'نارنجی تیره', hex: '#FF8C00', rgb: [255, 140, 0] },
+      { name: 'نارنجی روشن', hex: '#FFD700', rgb: [255, 215, 0] },
+      { name: 'بنفش', hex: '#800080', rgb: [128, 0, 128] },
+      { name: 'بنفش تیره', hex: '#4B0082', rgb: [75, 0, 130] },
+      { name: 'بنفش روشن', hex: '#E6E6FA', rgb: [230, 230, 250] },
+      { name: 'صورتی', hex: '#FF69B4', rgb: [255, 105, 180] },
+      { name: 'صورتی تیره', hex: '#C71585', rgb: [199, 21, 133] },
+      { name: 'صورتی روشن', hex: '#FFB6C1', rgb: [255, 182, 193] },
+      { name: 'خاکستری', hex: '#808080', rgb: [128, 128, 128] },
+      { name: 'خاکستری تیره', hex: '#696969', rgb: [105, 105, 105] },
+      { name: 'خاکستری روشن', hex: '#D3D3D3', rgb: [211, 211, 211] },
+      { name: 'مشکی', hex: '#000000', rgb: [0, 0, 0] },
+      { name: 'سفید', hex: '#FFFFFF', rgb: [255, 255, 255] },
+      { name: 'قهوه‌ای', hex: '#A52A2A', rgb: [165, 42, 42] },
+      { name: 'قهوه‌ای تیره', hex: '#8B4513', rgb: [139, 69, 19] },
+      { name: 'قهوه‌ای روشن', hex: '#F4A460', rgb: [244, 164, 96] },
+      { name: 'فیروزه‌ای', hex: '#57C5C6', rgb: [87, 197, 198] }, // Persian turquoise[](https://www.cyruscrafts.com/blog/information/an-introduction-to-the-persian-colors)
+      { name: 'آبی متوسط پارسی', hex: '#0067A5', rgb: [0, 103, 165] }, // Medium Persian Blue[](https://icolorpalette.com/color/medium-persian-blue)
+      { name: 'نیلی پارسی', hex: '#1C2574', rgb: [28, 37, 116] }, // Persian Indigo[](https://www.color-name.com/persian-blue.color)
+      { name: 'صورتی پارسی', hex: '#F7238B', rgb: [247, 35, 139] }, // Persian Pink (approximated)
+      { name: 'قرمز پارسی', hex: '#D81B60', rgb: [216, 27, 96] }, // Persian Red (approximated)
+      { name: 'نارنجی پارسی', hex: '#F57C00', rgb: [245, 124, 0] }, // Persian Orange (approximated)
+      { name: 'آبی آسمانی', hex: '#87CEEB', rgb: [135, 206, 235] },
+      { name: 'سبز زیتونی', hex: '#6B8E23', rgb: [107, 142, 35] },
+      { name: 'سبز لیمویی', hex: '#32CD32', rgb: [50, 205, 50] },
+      { name: 'آبی نیلی', hex: '#4B0082', rgb: [75, 0, 130] },
+      { name: 'قرمز گوجه‌ای', hex: '#FF6347', rgb: [255, 99, 71] },
+      { name: 'زرد طلایی', hex: '#FFD700', rgb: [255, 215, 0] },
+      { name: 'سبز زمردی', hex: '#2E8B57', rgb: [46, 139, 87] },
+      { name: 'آبی کبالت', hex: '#0047AB', rgb: [0, 71, 171] },
+      { name: 'بنفش یاسی', hex: '#C8A2C8', rgb: [200, 162, 200] },
+      { name: 'زرد خردلی', hex: '#FFDB58', rgb: [255, 219, 88] },
+      { name: 'سبز نعنایی', hex: '#98FF98', rgb: [152, 255, 152] },
+      { name: 'قرمز مرجانی', hex: '#FF7F50', rgb: [255, 127, 80] },
+      { name: 'آبی نفتی', hex: '#191970', rgb: [25, 25, 112] },
+      { name: 'صورتی گلبهی', hex: '#FF9999', rgb: [255, 153, 153] },
+      { name: 'سبز جنگلی', hex: '#228B22', rgb: [34, 139, 34] },
+      { name: 'آبی یخی', hex: '#F0F8FF', rgb: [240, 248, 255] },
+      { name: 'بنفش تیره', hex: '#483D8B', rgb: [72, 61, 139] },
+      { name: 'زرد لیمویی', hex: '#FFFACD', rgb: [255, 250, 205] },
+      { name: 'سبز دریایی', hex: '#20B2AA', rgb: [32, 178, 170] },
+      { name: 'قرمز شرابی', hex: '#800000', rgb: [128, 0, 0] },
+      { name: 'آبی فیروزه‌ای', hex: '#40E0D0', rgb: [64, 224, 208] },
+      { name: 'نارنجی سوخته', hex: '#CC5500', rgb: [204, 85, 0] }
+    ];
+
+    // Initialize Speech Synthesis
+    const synth = window.speechSynthesis;
+    let voices = [];
+
+    function loadVoices() {
+      voices = synth.getVoices();
+      // Prefer Persian (fa-IR) voice if available
+      const persianVoice = voices.find(voice => voice.lang === 'fa-IR');
+      return persianVoice || voices[0]; // Fallback to default voice
+    }
+
+    function speakColor(colorName) {
+      if (colorName === lastColorName) return; // Avoid repeating the same color
+      lastColorName = colorName;
+      const utterance = new SpeechSynthesisUtterance(colorName);
+      utterance.lang = 'fa-IR'; // Set to Persian
+      utterance.volume = 1;
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      const voice = loadVoices();
+      if (voice) utterance.voice = voice;
+      synth.speak(utterance);
+    }
+
+    // Get camera stream
+    async function getCameraStream() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+
+      try {
+        const constraints = {
+          video: {
+            facingMode: useFrontCamera ? 'user' : 'environment',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        };
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+      } catch (err) {
+        alert('دسترسی به دوربین رد شد یا در دسترس نیست.');
+        console.error(err);
+      }
+    }
+
+    // Calculate Euclidean distance between two RGB colors
+    function getColorDistance(rgb1, rgb2) {
+      return Math.sqrt(
+        (rgb1[0] - rgb2[0]) ** 2 +
+        (rgb1[1] - rgb2[1]) ** 2 +
+        (rgb1[2] - rgb2[2]) ** 2
+      );
+    }
+
+    // Find closest color
+    function findClosestColor(r, g, b) {
+      let minDistance = Infinity;
+      let closestColor = colors[0];
+
+      for (const color of colors) {
+        const distance = getColorDistance([r, g, b], color.rgb);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestColor = color;
+        }
+      }
+
+      return closestColor;
+    }
+
+    // Draw loop
+    function draw() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Get color at center pixel
+        const centerX = Math.floor(canvas.width / 2);
+        const centerY = Math.floor(canvas.height / 2);
+        const pixel = ctx.getImageData(centerX, centerY, 1, 1).data;
+        const [r, g, b] = pixel;
+
+        // Find closest color
+        const closestColor = findClosestColor(r, g, b);
+
+        // Update display
+        colorNameEl.textContent = closestColor.name;
+        hexCodeEl.textContent = closestColor.hex;
+        rgbCodeEl.textContent = `RGB(${closestColor.rgb[0]}, ${closestColor.rgb[1]}, ${closestColor.rgb[2]})`;
+        colorBoxEl.style.backgroundColor = closestColor.hex;
+
+        // Speak color name
+        speakColor(closestColor.name);
+
+        // Draw crosshair at center
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX - 10, centerY);
+        ctx.lineTo(centerX + 10, centerY);
+        ctx.moveTo(centerX, centerY - 10);
+        ctx.lineTo(centerX, centerY + 10);
+        ctx.stroke();
+      }
+      requestAnimationFrame(draw);
+    }
+
+    // Event listeners
+    switchBtn.addEventListener('click', () => {
+      useFrontCamera = !useFrontCamera;
+      getCameraStream();
+    });
+
+    // Initialize
+    getCameraStream().then(() => {
+      loadVoices();
+      requestAnimationFrame(draw);
+    });
+  </script>
+</body>
+</html>
