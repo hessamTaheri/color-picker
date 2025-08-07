@@ -53,6 +53,8 @@
   <canvas id="canvas"></canvas>
   <div id="controls">
     <button id="switchCamera">تغییر دوربین</button>
+    <button id="pauseResumeBtn">توقف</button>
+    <button id="playColorBtn">پخش نام رنگ</button>
   </div>
   <div id="colorInfo">
     <span>رنگ: </span><span id="colorName">در انتظار...</span><br>
@@ -64,8 +66,10 @@
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const switchBtn = document.getElementById('switchCamera');
+    const pauseResumeBtn = document.getElementById('pauseResumeBtn');
+    const playColorBtn = document.getElementById('playColorBtn');
     const colorNameEl = document.getElementById('colorName');
     const hexCodeEl = document.getElementById('hexCode');
     const rgbCodeEl = document.getElementById('rgbCode');
@@ -73,7 +77,9 @@
 
     let currentStream;
     let useFrontCamera = false; // Default to rear camera
+    let isPaused = false;
     let lastColorName = '';
+    let voicesLoaded = false;
 
     // List of 60 colors with Persian names, hex, and RGB codes
     const colors = [
@@ -81,8 +87,8 @@
       { name: 'آبی تیره', hex: '#00008B', rgb: [0, 0, 139] },
       { name: 'آبی روشن', hex: '#ADD8E6', rgb: [173, 216, 230] },
       { name: 'سبز پسته‌ای', hex: '#93C572', rgb: [147, 197, 114] },
-      { name: 'آبی پارسی', hex: '#1C39BB', rgb: [28, 57, 187] }, // Persian Blue[](https://www.rgbcolorcode.com/color/persian-blue)
-      { name: 'سبز پارسی', hex: '#00A693', rgb: [0, 166, 147] }, // Persian Green[](https://www.cyruscrafts.com/blog/information/an-introduction-to-the-persian-colors)
+      { name: 'آبی پارسی', hex: '#1C39BB', rgb: [28, 57, 187] },
+      { name: 'سبز پارسی', hex: '#00A693', rgb: [0, 166, 147] },
       { name: 'قرمز', hex: '#FF0000', rgb: [255, 0, 0] },
       { name: 'قرمز تیره', hex: '#8B0000', rgb: [139, 0, 0] },
       { name: 'قرمز روشن', hex: '#FF6666', rgb: [255, 102, 102] },
@@ -109,12 +115,12 @@
       { name: 'قهوه‌ای', hex: '#A52A2A', rgb: [165, 42, 42] },
       { name: 'قهوه‌ای تیره', hex: '#8B4513', rgb: [139, 69, 19] },
       { name: 'قهوه‌ای روشن', hex: '#F4A460', rgb: [244, 164, 96] },
-      { name: 'فیروزه‌ای', hex: '#57C5C6', rgb: [87, 197, 198] }, // Persian turquoise[](https://www.cyruscrafts.com/blog/information/an-introduction-to-the-persian-colors)
-      { name: 'آبی متوسط پارسی', hex: '#0067A5', rgb: [0, 103, 165] }, // Medium Persian Blue[](https://icolorpalette.com/color/medium-persian-blue)
-      { name: 'نیلی پارسی', hex: '#1C2574', rgb: [28, 37, 116] }, // Persian Indigo[](https://www.color-name.com/persian-blue.color)
-      { name: 'صورتی پارسی', hex: '#F7238B', rgb: [247, 35, 139] }, // Persian Pink (approximated)
-      { name: 'قرمز پارسی', hex: '#D81B60', rgb: [216, 27, 96] }, // Persian Red (approximated)
-      { name: 'نارنجی پارسی', hex: '#F57C00', rgb: [245, 124, 0] }, // Persian Orange (approximated)
+      { name: 'فیروزه‌ای', hex: '#57C5C6', rgb: [87, 197, 198] },
+      { name: 'آبی متوسط پارسی', hex: '#0067A5', rgb: [0, 103, 165] },
+      { name: 'نیلی پارسی', hex: '#1C2574', rgb: [28, 37, 116] },
+      { name: 'صورتی پارسی', hex: '#F7238B', rgb: [247, 35, 139] },
+      { name: 'قرمز پارسی', hex: '#D81B60', rgb: [216, 27, 96] },
+      { name: 'نارنجی پارسی', hex: '#F57C00', rgb: [245, 124, 0] },
       { name: 'آبی آسمانی', hex: '#87CEEB', rgb: [135, 206, 235] },
       { name: 'سبز زیتونی', hex: '#6B8E23', rgb: [107, 142, 35] },
       { name: 'سبز لیمویی', hex: '#32CD32', rgb: [50, 205, 50] },
@@ -144,22 +150,66 @@
     let voices = [];
 
     function loadVoices() {
-      voices = synth.getVoices();
-      // Prefer Persian (fa-IR) voice if available
-      const persianVoice = voices.find(voice => voice.lang === 'fa-IR');
-      return persianVoice || voices[0]; // Fallback to default voice
+      return new Promise(resolve => {
+        voices = synth.getVoices();
+        if (voices.length > 0) {
+          console.log('Voices loaded:', voices.map(v => ({ name: v.name, lang: v.lang })));
+          voicesLoaded = true;
+          const persianVoice = voices.find(voice => voice.lang === 'fa-IR');
+          if (!persianVoice) {
+            alert('صدا با زبان پارسی (fa-IR) یافت نشد. از صدای پیش‌فرض استفاده می‌شود.');
+          }
+          resolve(persianVoice || voices[0]);
+        } else {
+          synth.onvoiceschanged = () => {
+            voices = synth.getVoices();
+            console.log('Voices loaded after change:', voices.map(v => ({ name: v.name, lang: v.lang })));
+            voicesLoaded = true;
+            const persianVoice = voices.find(voice => voice.lang === 'fa-IR');
+            if (!persianVoice) {
+              alert('صدا با زبان پارسی (fa-IR) یافت نشد. از صدای پیش‌فرض استفاده می‌شود.');
+            }
+            resolve(persianVoice || voices[0]);
+          };
+          setTimeout(() => {
+            if (!voicesLoaded) {
+              voices = synth.getVoices();
+              console.log('Voices retry:', voices.map(v => ({ name: v.name, lang: v.lang })));
+              voicesLoaded = true;
+              const persianVoice = voices.find(voice => voice.lang === 'fa-IR');
+              resolve(persianVoice || voices[0]);
+            }
+          }, 2000);
+        }
+      });
     }
 
-    function speakColor(colorName) {
-      if (colorName === lastColorName) return; // Avoid repeating the same color
+    async function speakColor(colorName) {
+      if (!voicesLoaded) await loadVoices();
+      if (!colorName || colorName === 'در انتظار...') {
+        console.warn('No valid color name to speak');
+        return;
+      }
+      if (colorName === lastColorName && !isPaused) {
+        console.log('Skipping repeated color:', colorName);
+        return;
+      }
       lastColorName = colorName;
       const utterance = new SpeechSynthesisUtterance(colorName);
-      utterance.lang = 'fa-IR'; // Set to Persian
+      utterance.lang = 'fa-IR';
       utterance.volume = 1;
       utterance.rate = 1;
       utterance.pitch = 1;
-      const voice = loadVoices();
-      if (voice) utterance.voice = voice;
+      const voice = voices.find(v => v.lang === 'fa-IR') || voices[0];
+      if (voice) {
+        utterance.voice = voice;
+        console.log('Speaking color:', colorName, 'with voice:', voice.lang);
+      } else {
+        console.warn('No voice available');
+        alert('هیچ صدایی در دسترس نیست.');
+      }
+      utterance.onend = () => console.log('Speech finished:', colorName);
+      utterance.onerror = (e) => console.error('Speech error:', e);
       synth.speak(utterance);
     }
 
@@ -212,6 +262,11 @@
 
     // Draw loop
     function draw() {
+      if (isPaused) {
+        requestAnimationFrame(draw);
+        return;
+      }
+
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -232,8 +287,10 @@
         rgbCodeEl.textContent = `RGB(${closestColor.rgb[0]}, ${closestColor.rgb[1]}, ${closestColor.rgb[2]})`;
         colorBoxEl.style.backgroundColor = closestColor.hex;
 
-        // Speak color name
-        speakColor(closestColor.name);
+        // Speak color name (only in real-time if not paused)
+        if (!isPaused) {
+          speakColor(closestColor.name);
+        }
 
         // Draw crosshair at center
         ctx.strokeStyle = '#FFFFFF';
@@ -254,10 +311,33 @@
       getCameraStream();
     });
 
+    pauseResumeBtn.addEventListener('click', () => {
+      isPaused = !isPaused;
+      pauseResumeBtn.textContent = isPaused ? 'ادامه' : 'توقف';
+      if (isPaused) {
+        const currentColorName = colorNameEl.textContent;
+        if (currentColorName !== 'در انتظار...') {
+          speakColor(currentColorName);
+        }
+      }
+    });
+
+    playColorBtn.addEventListener('click', () => {
+      console.log('Play button clicked');
+      const currentColorName = colorNameEl.textContent;
+      if (currentColorName !== 'در انتظار...') {
+        speakColor(currentColorName);
+      } else {
+        console.warn('No color to speak');
+      }
+    });
+
     // Initialize
     getCameraStream().then(() => {
-      loadVoices();
-      requestAnimationFrame(draw);
+      loadVoices().then(() => {
+        console.log('Voices initialized');
+        requestAnimationFrame(draw);
+      });
     });
   </script>
 </body>
